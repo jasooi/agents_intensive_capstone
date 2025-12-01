@@ -12,6 +12,8 @@ import os
 os.environ["GOOGLE_API_KEY"] = "REDACTED"
 
 # Import relevant packages
+from google import genai
+from google.adk.models.google_llm import Gemini
 from google.genai import types
 from google.adk.agents import Agent
 from google.adk.tools import AgentTool, FunctionTool, google_search
@@ -26,11 +28,22 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
 
+# # Define a retry policy in case of failure
+# from google.api_core import retry
+
+# Define retry config
+retry_config = types.HttpRetryOptions(
+    attempts=5,  # Maximum retry attempts
+    exp_base=7,  # Delay multiplier
+    initial_delay=1,
+    http_status_codes=[429, 500, 503, 504],  # Retry on these HTTP errors
+)
+
 
 # Create clarifier agent
 clarifier = Agent(
     name="clarifier",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="An agent who asks the human user questions.",
     instruction="""You are an expert in communications. You work in a team whose aim is to write an email on behalf of a human user. 
     Your job is to ask questions to ensure that the email writer has all the details they need to write a good email.
@@ -44,6 +57,8 @@ clarifier = Agent(
     Another example of a good response: "I understand that it must have been a difficult time for you. How long ago did you leave the company?"
     
     An example of a bad response: "What else do you have to say to them?"
+
+    Return the question text only with no additional text.
     
     """,
 )
@@ -52,7 +67,7 @@ clarifier = Agent(
 # Create content brief drafter agent
 content_brief_drafter = Agent(
     name="content_brief_drafter",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="A content brief writer agent.",
     instruction="""You are an experienced content brief writer. 
     You work in a team whose aim is to write an email on behalf of a human user.
@@ -78,7 +93,7 @@ content_brief_drafter = Agent(
 # Create email drafter agent
 email_drafter = Agent(
     name="email_drafter",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="An agent who writes emails.",
     instruction="""You are an agent who helps the user write emails. 
     You work in a team whose aim is to write an email on behalf of a human user.
@@ -100,7 +115,7 @@ email_drafter = Agent(
 # Create email editor agent
 email_editor = Agent(
     name="email_editor",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="An agent who edits emails.",
     instruction="""You are a constructive critic.  
     You work in a team whose aim is to write an email on behalf of a human user.
@@ -126,7 +141,7 @@ def finalise_email()->dict:
 # Create email refiner agent
 email_refiner = Agent(
     name="email_refiner",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="An agent who rewrites emails based on feedback.",
     instruction="""You are an email refiner.  You have an email draft and the feedback on it.
 
@@ -230,7 +245,7 @@ def send_email(message_title:str, message_body:str, sender:str, recipient:str)->
 # Create root agent... AKA the big mastermind
 root_agent = Agent(
     name="master",
-    model="gemini-2.5-flash-lite",
+    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
     description="An agent that helps the human user to write an email.",
     instruction= """You manage a team that writes an email on behalf of the human user. 
     Your goal is to write an email that accurately captures the human user's intended sentiment and message to their target audience, who is someone they no longer talk to.
@@ -238,7 +253,7 @@ root_agent = Agent(
     You are chatting with the human user. Use a friendly and empathetic tone, as if you were a close friend of the user.
     You MUST follow the below steps:
     1) Judge if you have information about the intended purpose, target audience, desired tone of the email from the user.
-    2) If you do not have any of the above information, call the `clarifier` agent to ask questions to get the necessary information. 
+    2) If you do not have any of the above information, call the `clarifier` agent to generate a question, which you should use to ask the user for more information
     3) Call the `content_brief_drafter` agent to create an email content brief.  
     4) Show the content brief to the user and ask for their feedback. DO NOT skip this step.
     5) If there is feedback from the user on the content brief, call the `content_brief_drafter` agent to write a new brief based on the feedback. 
